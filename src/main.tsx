@@ -1,4 +1,4 @@
-import { StrictMode, useRef, useState } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   ArrowDownToLine,
@@ -33,6 +33,20 @@ const initialHoldings: Holding[] = [
   { ticker: 'AAPL', name: 'Apple Inc.', shares: '50', price: '$211.18', value: '$10,559.00', change: '+8.1%', tone: 'orange' },
 ]
 
+const HOLDINGS_KEY = 'folio_holdings'
+
+function loadHoldings(): Holding[] {
+  try {
+    const raw = window.localStorage.getItem(HOLDINGS_KEY)
+    if (!raw) return initialHoldings
+    const parsed = JSON.parse(raw) as Holding[]
+    if (!Array.isArray(parsed)) return initialHoldings
+    return parsed
+  } catch {
+    return initialHoldings
+  }
+}
+
 const allocation = [
   { label: '米国株', value: 61, color: '#3559e6' },
   { label: 'ETF', value: 27, color: '#8b78e8' },
@@ -49,7 +63,7 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 function App() {
-  const [holdings, setHoldings] = useState(initialHoldings)
+  const [holdings, setHoldings] = useState<Holding[]>(loadHoldings)
   const [active, setActive] = useState('overview')
   const [showImporter, setShowImporter] = useState(false)
   const [imageName, setImageName] = useState('')
@@ -58,6 +72,10 @@ function App() {
   const [extracted, setExtracted] = useState<ExtractedHolding[]>([])
   const [importError, setImportError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    window.localStorage.setItem(HOLDINGS_KEY, JSON.stringify(holdings))
+  }, [holdings])
 
   const handleFile = async (file?: File) => {
     if (!file) {
