@@ -14,7 +14,6 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Settings,
   Sparkles,
@@ -35,6 +34,18 @@ const initialHoldings: Holding[] = [
 ]
 
 const HOLDINGS_KEY = 'folio_holdings'
+const CASH_KEY = 'folio_cash'
+
+function loadCash(): { usd: number; jpy: number } {
+  try {
+    const raw = window.localStorage.getItem(CASH_KEY)
+    if (!raw) return { usd: 7232.5, jpy: 0 }
+    const parsed = JSON.parse(raw) as { usd?: number; jpy?: number }
+    return { usd: Number(parsed.usd) || 0, jpy: Number(parsed.jpy) || 0 }
+  } catch {
+    return { usd: 7232.5, jpy: 0 }
+  }
+}
 
 function loadHoldings(): Holding[] {
   try {
@@ -73,11 +84,18 @@ function App() {
   const [extracted, setExtracted] = useState<ExtractedHolding[]>([])
   const [importError, setImportError] = useState('')
   const [editing, setEditing] = useState<Holding | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [cash, setCash] = useState<{ usd: number; jpy: number }>(loadCash)
+  const [showCash, setShowCash] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     window.localStorage.setItem(HOLDINGS_KEY, JSON.stringify(holdings))
   }, [holdings])
+
+  useEffect(() => {
+    window.localStorage.setItem(CASH_KEY, JSON.stringify(cash))
+  }, [cash])
 
   const handleFile = async (file?: File) => {
     if (!file) {
@@ -136,6 +154,27 @@ function App() {
     setEditing(null)
   }
 
+  const addHolding = (h: { ticker: string; name: string; currency: 'USD' | 'JPY'; shares: number; price: number; tone?: string }) => {
+    const symbol = h.currency === 'JPY' ? '¥' : '$'
+    const newHolding: Holding = {
+      ticker: h.ticker,
+      name: h.name || h.ticker,
+      shares: String(h.shares),
+      price: `${symbol}${h.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+      value: `${symbol}${(h.shares * h.price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      change: '—',
+      tone: h.tone || 'blue',
+    }
+    setHoldings((items) => [newHolding, ...items])
+    setShowAdd(false)
+  }
+
+  const addCash = (currency: 'USD' | 'JPY', amount: number) => {
+    if (!amount || amount <= 0) return
+    setCash((prev) => (currency === 'USD' ? { ...prev, usd: prev.usd + amount } : { ...prev, jpy: prev.jpy + amount }))
+    setShowCash(false)
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -158,14 +197,16 @@ function App() {
         <header className="topbar"><div className="breadcrumbs"><span>Portfolio</span><span>/</span><strong>Overview</strong></div><div className="top-actions"><div className="search"><Search size={16} /><input placeholder="Search holdings..." /></div><button className="icon-button"><Bell size={18} /></button><button className="avatar-small">TK</button></div></header>
         <div className="content-wrap">
           <section className="page-heading"><div><p className="eyebrow">TUESDAY, JUNE 17, 2025 <span className="live-dot" />MARKET OPEN</p><h1>Good morning, Tokutake <span>✦</span></h1><p className="subheading">Here's how your portfolio is doing today.</p></div><div className="heading-actions"><button className="secondary-button"><ArrowDownToLine size={16} />Export</button><button className="primary-button" onClick={() => setShowImporter(true)}><Sparkles size={16} />Import with AI</button></div></section>
-          <section className="metrics-grid"><Metric label="Total portfolio value" value="$60,275.40" change="+$1,842.24" percent="+3.15%" icon={<WalletCards size={18} />} positive /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value="$7,232.50" change="12.0% of portfolio" percent="" icon={<WalletCards size={18} />} /></section>
+          <section className="metrics-grid"><Metric label="Total portfolio value" value="$60,275.40" change="+$1,842.24" percent="+3.15%" icon={<WalletCards size={18} />} positive /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${cash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${cash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
           <div className="dashboard-grid"><section className="panel performance-panel"><div className="panel-heading"><div><h2>Portfolio performance</h2><p>Track your portfolio value over time</p></div><div className="range-tabs"><button>1W</button><button>1M</button><button className="selected">3M</button><button>1Y</button><button>ALL</button></div></div><div className="chart-wrap"><div className="chart-y"><span>$65k</span><span>$60k</span><span>$55k</span><span>$50k</span><span>$45k</span></div><svg viewBox="0 0 720 250" preserveAspectRatio="none" className="chart"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#4264e8" stopOpacity=".2" /><stop offset="100%" stopColor="#4264e8" stopOpacity="0" /></linearGradient></defs><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20 L720,250 L0,250Z" fill="url(#area)" /><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20" fill="none" stroke="#4264e8" strokeWidth="3" strokeLinecap="round" /></svg><div className="chart-x"><span>Mar 17</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span><span>May 15</span><span>Jun 01</span><span>Jun 17</span></div></div></section><section className="panel allocation-panel"><div className="panel-heading"><div><h2>Allocation</h2><p>Where your money is invested</p></div><button className="more-button"><MoreHorizontal size={18} /></button></div><div className="donut-area"><div className="donut"><div className="donut-hole"><strong>88%</strong><span>Invested</span></div></div><div className="legend">{allocation.map((item) => <div className="legend-row" key={item.label}><span className="legend-swatch" style={{ background: item.color }} /><span>{item.label}</span><strong>{item.value}%</strong></div>)}</div></div><button className="text-button">View allocation details <ArrowUpRight size={14} /></button></section></div>
-          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button"><RefreshCw size={15} />Refresh prices</button><button className="add-button" onClick={() => setShowImporter(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><span>VALUE</span><span>RETURN</span><span /></div>{holdings.map((holding) => <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><strong>{holding.value}</strong><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div>)}</div></section>
+          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Add cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><span>VALUE</span><span>RETURN</span><span /></div>{holdings.map((holding) => <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><strong>{holding.value}</strong><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div>)}</div></section>
           <section className="ai-callout"><div className="ai-orb"><Sparkles size={22} /></div><div><p className="eyebrow">FOLIO AI</p><h2>Turn a screenshot into your portfolio</h2><p>Upload a brokerage screenshot and let AI extract tickers, shares, and prices for you. No manual entry needed.</p></div><button className="primary-button" onClick={() => setShowImporter(true)}>Try AI import <ArrowUpRight size={15} /></button></section>
         </div>
       </main>
       {showImporter && <ImporterModal apiKey={apiKey} setApiKey={setApiKey} imageName={imageName} analyzing={analyzing} extracted={extracted} error={importError} fileRef={fileRef} onFile={handleFile} onAdd={addExtracted} onClose={() => setShowImporter(false)} />}
       {editing && <EditModal holding={editing} onSave={updateHolding} onClose={() => setEditing(null)} />}
+      {showAdd && <AddHoldingModal onAdd={addHolding} onClose={() => setShowAdd(false)} />}
+      {showCash && <CashModal onAdd={addCash} onClose={() => setShowCash(false)} />}
     </div>
   )
 }
@@ -176,6 +217,42 @@ function Metric({ label, value, change, percent, icon, positive }: { label: stri
 
 function stripSymbol(s: string): string {
   return s.replace(/[^0-9.,-]/g, '')
+}
+
+function CashModal({ onAdd, onClose }: { onAdd: (currency: 'USD' | 'JPY', amount: number) => void; onClose: () => void }) {
+  const [currency, setCurrency] = useState<'USD' | 'JPY'>('USD')
+  const [amount, setAmount] = useState('')
+  const symbol = currency === 'JPY' ? '¥' : '$'
+  const numAmount = Number(amount) || 0
+  const valid = numAmount > 0
+
+  const save = () => {
+    if (!valid) return
+    onAdd(currency, numAmount)
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><div className="modal-kicker"><WalletCards size={14} />ADD CASH</div><h2>Add cash</h2><p>Track your available cash. Choose the currency and enter the amount.</p></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><div className="market-toggle"><button className={currency === 'USD' ? 'selected' : ''} onClick={() => setCurrency('USD')}><span className="flag">$</span>US ドル</button><button className={currency === 'JPY' ? 'selected' : ''} onClick={() => setCurrency('JPY')}><span className="flag">¥</span>日本円</button></div><label className="api-key-field"><span>AMOUNT ({symbol})</span><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0" autoFocus /></label><div className="modal-footer" style={{ marginTop: 0 }}><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={save} disabled={!valid}><Plus size={16} />Add cash</button></div></div></div>
+}
+
+function AddHoldingModal({ onAdd, onClose }: { onAdd: (h: { ticker: string; name: string; currency: 'USD' | 'JPY'; shares: number; price: number; tone?: string }) => void; onClose: () => void }) {
+  const [currency, setCurrency] = useState<'USD' | 'JPY'>('USD')
+  const [ticker, setTicker] = useState('')
+  const [name, setName] = useState('')
+  const [shares, setShares] = useState('')
+  const [price, setPrice] = useState('')
+  const symbol = currency === 'JPY' ? '¥' : '$'
+  const numShares = Number(shares) || 0
+  const numPrice = Number(price) || 0
+  const value = symbol + (numShares * numPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })
+  const valid = ticker.trim() && numShares > 0 && numPrice > 0
+  const tone = currency === 'JPY' ? 'green' : currency === 'USD' ? 'blue' : 'blue'
+
+  const save = () => {
+    if (!valid) return
+    onAdd({ ticker: ticker.trim().toUpperCase(), name: name.trim(), currency, shares: numShares, price: numPrice, tone })
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><div className="modal-kicker"><Plus size={14} />ADD HOLDING</div><h2>Add holding</h2><p>Add a stock holding manually. Choose the market and fill in the details.</p></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><div className="market-toggle"><button className={currency === 'USD' ? 'selected' : ''} onClick={() => setCurrency('USD')}><span className="flag">US</span>アメリカ</button><button className={currency === 'JPY' ? 'selected' : ''} onClick={() => setCurrency('JPY')}><span className="flag">JP</span>日本</button></div><label className="api-key-field"><span>{currency === 'USD' ? 'TICKER' : '証券コード'}</span><input type="text" value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder={currency === 'USD' ? 'AAPL' : '7203'} /></label><label className="api-key-field"><span>{currency === 'USD' ? 'NAME' : '銘柄名'}</span><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={currency === 'USD' ? 'Apple Inc.' : 'トヨタ自動車'} /></label><div className="edit-grid"><label className="api-key-field"><span>{currency === 'USD' ? 'SHARES' : '株数'}</span><input type="number" value={shares} onChange={(e) => setShares(e.target.value)} inputMode="decimal" placeholder="100" /></label><label className="api-key-field"><span>PRICE ({symbol})</span><input type="number" value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" placeholder="150.00" /></label></div><div className="edit-value"><span>VALUE</span><strong>{value}</strong></div><div className="modal-footer"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={save} disabled={!valid}><Plus size={16} />Add holding</button></div></div></div>
 }
 
 function EditModal({ holding, onSave, onClose }: { holding: Holding; onSave: (h: Holding) => void; onClose: () => void }) {
