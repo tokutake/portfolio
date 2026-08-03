@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   Sparkles,
@@ -59,6 +60,13 @@ function valueUsd(h: Holding, fxRate: number): number {
   const { currency, amount } = parseMoney(h.value)
   return currency === 'JPY' ? amount / fxRate : amount
 }
+
+// Yahoo Finance のシンボルに変換（日本株は .T 付与、米国株/ETFはそのまま）
+function yahooSymbol(ticker: string, isJpy: boolean): string {
+  return isJpy ? `${ticker}.T` : ticker
+}
+
+type Quote = { price: number; prevClose: number | null }
 
 function loadCash(): { usd: number; jpy: number } {
   try {
@@ -114,6 +122,8 @@ function App() {
   const [fxRate, setFxRate] = useState<number>(loadFx)
   const [showFx, setShowFx] = useState(false)
   const [valueSort, setValueSort] = useState<'asc' | 'desc' | null>(null)
+  const [updating, setUpdating] = useState(false)
+  const [updateMsg, setUpdateMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -213,6 +223,59 @@ function App() {
     setShowAdd(false)
   }
 
+  // 株価・為替をYahoo Financeから一括更新
+  const refreshPrices = async () => {
+    setUpdating(true)
+    setUpdateMsg('')
+    const errors: string[] = []
+    try {
+      // 為替(JPY=X) + 全銘柄を1リクエストで取得
+      const syms = holdings.map((h) => yahooSymbol(h.ticker, h.price.trim().startsWith('¥')))
+      const targets = ['JPY=X', ...syms]
+      const res = await fetch(`/marketdata/multi?symbols=${encodeURIComponent(targets.join(','))}`)
+      if (!res.ok) throw new Error(`取得失敗 (${res.status})`)
+      const json = await res.json()
+      const quotes = new Map<string, Quote>()
+      for (const r of (json?.quoteResponse?.result || []) as { symbol: string; regularMarketPrice: number; regularMarketPreviousClose?: number | null }[]) {
+        if (r.regularMarketPrice != null) quotes.set(r.symbol, { price: r.regularMarketPrice, prevClose: r.regularMarketPreviousClose ?? null })
+      }
+
+      // 為替レートを更新
+      const fx = quotes.get('JPY=X')
+      const fxNote = fx ? (setFxRate(Math.round(fx.price)), '為替を更新') : (errors.push('為替レートの取得に失敗'), '')
+
+      // 各銘柄の株価を更新
+      const updated: (Holding | null)[] = []
+      for (const h of holdings) {
+        const isJpy = h.price.trim().startsWith('¥')
+        const q = quotes.get(yahooSymbol(h.ticker, isJpy))
+        if (!q) {
+          errors.push(`${h.ticker}: データなし`)
+          updated.push(null)
+          continue
+        }
+        const shares = Number(h.shares) || 0
+        const symbol = isJpy ? '¥' : '$'
+        const changePct = q.prevClose ? ((q.price - q.prevClose) / q.prevClose) * 100 : 0
+        const change = `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%`
+        updated.push({
+          ...h,
+          price: `${symbol}${q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+          value: `${symbol}${(shares * q.price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+          change,
+        })
+      }
+      const ok = updated.filter((h): h is Holding => h !== null)
+      if (ok.length) setHoldings(ok)
+      const parts = [fxNote, ok.length ? `${ok.length}銘柄を更新` : ''].filter(Boolean)
+      setUpdateMsg([...parts, ...(errors.length ? [`エラー: ${errors.join(' · ')}`] : [])].join(' · ') || '更新に失敗しました')
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : '更新に失敗しました')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
   const saveCash = (usd: number, jpy: number) => {
     setCash({ usd: usd || 0, jpy: jpy || 0 })
     setShowCash(false)
@@ -242,8 +305,9 @@ function App() {
           <section className="page-heading"><div><p className="eyebrow">TUESDAY, JUNE 17, 2025 <span className="live-dot" />MARKET OPEN</p><h1>Good morning, Tokutake <span>✦</span></h1><p className="subheading">Here's how your portfolio is doing today.</p></div><div className="heading-actions"><button className="secondary-button"><ArrowDownToLine size={16} />Export</button><button className="primary-button" onClick={() => setShowImporter(true)}><Sparkles size={16} />Import with AI</button></div></section>
           <section className="metrics-grid"><TotalMetric usd={totalInUsd} jpy={totalInJpy} fxRate={fxRate} onRate={() => setShowFx(true)} /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${cash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${cash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
           <div className="dashboard-grid"><section className="panel performance-panel"><div className="panel-heading"><div><h2>Portfolio performance</h2><p>Track your portfolio value over time</p></div><div className="range-tabs"><button>1W</button><button>1M</button><button className="selected">3M</button><button>1Y</button><button>ALL</button></div></div><div className="chart-wrap"><div className="chart-y"><span>$65k</span><span>$60k</span><span>$55k</span><span>$50k</span><span>$45k</span></div><svg viewBox="0 0 720 250" preserveAspectRatio="none" className="chart"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#4264e8" stopOpacity=".2" /><stop offset="100%" stopColor="#4264e8" stopOpacity="0" /></linearGradient></defs><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20 L720,250 L0,250Z" fill="url(#area)" /><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20" fill="none" stroke="#4264e8" strokeWidth="3" strokeLinecap="round" /></svg><div className="chart-x"><span>Mar 17</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span><span>May 15</span><span>Jun 01</span><span>Jun 17</span></div></div></section><section className="panel allocation-panel"><div className="panel-heading"><div><h2>Allocation</h2><p>Where your money is invested</p></div><button className="more-button"><MoreHorizontal size={18} /></button></div><div className="donut-area"><div className="donut"><div className="donut-hole"><strong>88%</strong><span>Invested</span></div></div><div className="legend">{allocation.map((item) => <div className="legend-row" key={item.label}><span className="legend-swatch" style={{ background: item.color }} /><span>{item.label}</span><strong>{item.value}%</strong></div>)}</div></div><button className="text-button">View allocation details <ArrowUpRight size={14} /></button></section></div>
-          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><button className="sort-head" onClick={() => setValueSort(valueSort === 'desc' ? 'asc' : 'desc')}>VALUE {valueSort ? (valueSort === 'desc' ? '↓' : '↑') : ''}</button><span>RETURN</span><span /></div>{sortedHoldings.map((holding) => { const mv = parseMoney(holding.value); const conv = mv.currency === 'JPY' ? `$${Math.round(mv.amount / fxRate).toLocaleString()}` : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`; return <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><div className="value-cell"><strong>{holding.value}</strong><small>{conv}</small></div><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div> })}</div></section>
+          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button" onClick={refreshPrices} disabled={updating}><RefreshCw size={15} />{updating ? '更新中…' : 'Update prices'}</button><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><button className="sort-head" onClick={() => setValueSort(valueSort === 'desc' ? 'asc' : 'desc')}>VALUE {valueSort ? (valueSort === 'desc' ? '↓' : '↑') : ''}</button><span>RETURN</span><span /></div>{sortedHoldings.map((holding) => { const mv = parseMoney(holding.value); const conv = mv.currency === 'JPY' ? `$${Math.round(mv.amount / fxRate).toLocaleString()}` : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`; return <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><div className="value-cell"><strong>{holding.value}</strong><small>{conv}</small></div><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div> })}</div></section>
           <section className="ai-callout"><div className="ai-orb"><Sparkles size={22} /></div><div><p className="eyebrow">FOLIO AI</p><h2>Turn a screenshot into your portfolio</h2><p>Upload a brokerage screenshot and let AI extract tickers, shares, and prices for you. No manual entry needed.</p></div><button className="primary-button" onClick={() => setShowImporter(true)}>Try AI import <ArrowUpRight size={15} /></button></section>
+          {updateMsg && <div className="update-msg">{updateMsg}</div>}
         </div>
       </main>
       {showImporter && <ImporterModal apiKey={apiKey} setApiKey={setApiKey} imageName={imageName} analyzing={analyzing} extracted={extracted} error={importError} fileRef={fileRef} onFile={handleFile} onAdd={addExtracted} onClose={() => setShowImporter(false)} />}
