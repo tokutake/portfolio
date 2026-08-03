@@ -35,6 +35,24 @@ const initialHoldings: Holding[] = [
 
 const HOLDINGS_KEY = 'folio_holdings'
 const CASH_KEY = 'folio_cash'
+const FX_KEY = 'folio_fx'
+
+function loadFx(): number {
+  try {
+    const raw = window.localStorage.getItem(FX_KEY)
+    const n = Number(raw)
+    return n && n > 0 ? n : 150
+  } catch {
+    return 150
+  }
+}
+
+// "$14,199.60" や "¥1,234,567" を通貨付き数値に分解
+function parseMoney(s: string): { currency: 'USD' | 'JPY'; amount: number } {
+  const currency = s.trim().startsWith('¥') ? 'JPY' : 'USD'
+  const amount = Number(s.replace(/[^0-9.-]/g, '')) || 0
+  return { currency, amount }
+}
 
 function loadCash(): { usd: number; jpy: number } {
   try {
@@ -87,6 +105,8 @@ function App() {
   const [showAdd, setShowAdd] = useState(false)
   const [cash, setCash] = useState<{ usd: number; jpy: number }>(loadCash)
   const [showCash, setShowCash] = useState(false)
+  const [fxRate, setFxRate] = useState<number>(loadFx)
+  const [showFx, setShowFx] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -96,6 +116,21 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(CASH_KEY, JSON.stringify(cash))
   }, [cash])
+
+  useEffect(() => {
+    window.localStorage.setItem(FX_KEY, String(fxRate))
+  }, [fxRate])
+
+  // 両通貨の合計を計算（fxRate で換算）
+  let totalUsd = cash.usd
+  let totalJpy = cash.jpy
+  holdings.forEach((h) => {
+    const { currency, amount } = parseMoney(h.value)
+    if (currency === 'JPY') totalJpy += amount
+    else totalUsd += amount
+  })
+  const totalInUsd = totalUsd + totalJpy / fxRate
+  const totalInJpy = totalUsd * fxRate + totalJpy
 
   const handleFile = async (file?: File) => {
     if (!file) {
@@ -197,7 +232,7 @@ function App() {
         <header className="topbar"><div className="breadcrumbs"><span>Portfolio</span><span>/</span><strong>Overview</strong></div><div className="top-actions"><div className="search"><Search size={16} /><input placeholder="Search holdings..." /></div><button className="icon-button"><Bell size={18} /></button><button className="avatar-small">TK</button></div></header>
         <div className="content-wrap">
           <section className="page-heading"><div><p className="eyebrow">TUESDAY, JUNE 17, 2025 <span className="live-dot" />MARKET OPEN</p><h1>Good morning, Tokutake <span>✦</span></h1><p className="subheading">Here's how your portfolio is doing today.</p></div><div className="heading-actions"><button className="secondary-button"><ArrowDownToLine size={16} />Export</button><button className="primary-button" onClick={() => setShowImporter(true)}><Sparkles size={16} />Import with AI</button></div></section>
-          <section className="metrics-grid"><Metric label="Total portfolio value" value="$60,275.40" change="+$1,842.24" percent="+3.15%" icon={<WalletCards size={18} />} positive /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${cash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${cash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
+          <section className="metrics-grid"><TotalMetric usd={totalInUsd} jpy={totalInJpy} fxRate={fxRate} onRate={() => setShowFx(true)} /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${cash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${cash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
           <div className="dashboard-grid"><section className="panel performance-panel"><div className="panel-heading"><div><h2>Portfolio performance</h2><p>Track your portfolio value over time</p></div><div className="range-tabs"><button>1W</button><button>1M</button><button className="selected">3M</button><button>1Y</button><button>ALL</button></div></div><div className="chart-wrap"><div className="chart-y"><span>$65k</span><span>$60k</span><span>$55k</span><span>$50k</span><span>$45k</span></div><svg viewBox="0 0 720 250" preserveAspectRatio="none" className="chart"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#4264e8" stopOpacity=".2" /><stop offset="100%" stopColor="#4264e8" stopOpacity="0" /></linearGradient></defs><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20 L720,250 L0,250Z" fill="url(#area)" /><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20" fill="none" stroke="#4264e8" strokeWidth="3" strokeLinecap="round" /></svg><div className="chart-x"><span>Mar 17</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span><span>May 15</span><span>Jun 01</span><span>Jun 17</span></div></div></section><section className="panel allocation-panel"><div className="panel-heading"><div><h2>Allocation</h2><p>Where your money is invested</p></div><button className="more-button"><MoreHorizontal size={18} /></button></div><div className="donut-area"><div className="donut"><div className="donut-hole"><strong>88%</strong><span>Invested</span></div></div><div className="legend">{allocation.map((item) => <div className="legend-row" key={item.label}><span className="legend-swatch" style={{ background: item.color }} /><span>{item.label}</span><strong>{item.value}%</strong></div>)}</div></div><button className="text-button">View allocation details <ArrowUpRight size={14} /></button></section></div>
           <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Add cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><span>VALUE</span><span>RETURN</span><span /></div>{holdings.map((holding) => <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><strong>{holding.value}</strong><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div>)}</div></section>
           <section className="ai-callout"><div className="ai-orb"><Sparkles size={22} /></div><div><p className="eyebrow">FOLIO AI</p><h2>Turn a screenshot into your portfolio</h2><p>Upload a brokerage screenshot and let AI extract tickers, shares, and prices for you. No manual entry needed.</p></div><button className="primary-button" onClick={() => setShowImporter(true)}>Try AI import <ArrowUpRight size={15} /></button></section>
@@ -207,8 +242,15 @@ function App() {
       {editing && <EditModal holding={editing} onSave={updateHolding} onClose={() => setEditing(null)} />}
       {showAdd && <AddHoldingModal onAdd={addHolding} onClose={() => setShowAdd(false)} />}
       {showCash && <CashModal onAdd={addCash} onClose={() => setShowCash(false)} />}
+      {showFx && <RateModal fxRate={fxRate} setFxRate={setFxRate} onClose={() => setShowFx(false)} />}
     </div>
   )
+}
+
+function TotalMetric({ usd, jpy, fxRate, onRate }: { usd: number; jpy: number; fxRate: number; onRate: () => void }) {
+  const fmtUsd = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}`
+  const fmtJpy = (n: number) => `¥${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  return <div className="metric-card total-card"><div className="metric-top"><span>Total portfolio value</span><button className="rate-button" onClick={onRate} title="Edit exchange rate">1$ = ¥{fxRate} <Settings size={13} /></button></div><strong className="metric-value">{fmtUsd(usd)}</strong><div className="metric-foot"><span className="positive">{fmtJpy(jpy)}</span><span className="percent-pill">USD/JPY</span></div></div>
 }
 
 function Metric({ label, value, change, percent, icon, positive }: { label: string; value: string; change: string; percent: string; icon: React.ReactNode; positive?: boolean }) {
@@ -217,6 +259,20 @@ function Metric({ label, value, change, percent, icon, positive }: { label: stri
 
 function stripSymbol(s: string): string {
   return s.replace(/[^0-9.,-]/g, '')
+}
+
+function RateModal({ fxRate, setFxRate, onClose }: { fxRate: number; setFxRate: (n: number) => void; onClose: () => void }) {
+  const [rate, setRate] = useState(String(fxRate))
+  const numRate = Number(rate)
+  const valid = numRate > 0
+
+  const save = () => {
+    if (!valid) return
+    setFxRate(numRate)
+    onClose()
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><div className="modal-kicker"><Settings size={14} />EXCHANGE RATE</div><h2>USD/JPY rate</h2><p>Set how many yen one US dollar equals. Used to show total value in both currencies.</p></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><label className="api-key-field"><span>1 USD = (JPY)</span><input type="number" value={rate} onChange={(e) => setRate(e.target.value)} inputMode="decimal" autoFocus /></label><div className="modal-footer" style={{ marginTop: 0 }}><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={save} disabled={!valid}>Save rate</button></div></div></div>
 }
 
 function CashModal({ onAdd, onClose }: { onAdd: (currency: 'USD' | 'JPY', amount: number) => void; onClose: () => void }) {
