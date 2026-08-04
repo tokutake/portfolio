@@ -15,7 +15,7 @@ import { RateModal } from './components/modals/RateModal'
 import { ASSET_ETF, TONES } from './constants'
 import { analyzeScreenshot, backfillShares, fileToDataUrl } from './lib/aiImport'
 import { fetchQuotes, yahooSymbol } from './lib/marketdata'
-import { parseMoney, valueUsd } from './lib/money'
+import { aggregateHoldings, parseMoney, valueUsd } from './lib/money'
 import { getApiKey, loadFx, loadPortfolios, saveApiKey, saveFx, savePortfolios } from './lib/storage'
 import type { CashAmount, ExtractedHolding, Holding, Portfolio } from './types'
 
@@ -61,7 +61,7 @@ function App() {
     (acc, p) => ({ usd: acc.usd + p.cash.usd, jpy: acc.jpy + p.cash.jpy }),
     { usd: 0, jpy: 0 },
   )
-  const displayHoldings = isAll ? allHoldings : holdings
+  const displayHoldings = isAll ? aggregateHoldings(allHoldings, fxRate) : holdings
   const displayCash = isAll ? allCash : cash
 
   // 両通貨の合計を計算（fxRate で換算）
