@@ -58,13 +58,13 @@ export function HoldingsTable({
           <span>RETURN</span>
           <span />
         </div>
-        {holdings.map((holding) => {
+        {holdings.map((holding, index) => {
           const mv = parseMoney(holding.value)
           const conv = mv.currency === 'JPY'
             ? `$${Math.round(mv.amount / fxRate).toLocaleString()}`
             : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`
           return (
-            <div className="table-row" key={holding.ticker}>
+            <div className="table-row" key={index}>
               <div className="asset-cell">
                 <div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div>
                 <div><strong>{holding.ticker}</strong><small>{holding.name}</small></div>
