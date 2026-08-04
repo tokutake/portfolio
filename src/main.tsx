@@ -6,7 +6,6 @@ import {
   BarChart3,
   Bell,
   Bot,
-  ChevronDown,
   CircleHelp,
   FileImage,
   Home,
@@ -26,6 +25,8 @@ import './styles.css'
 
 type Holding = { ticker: string; name: string; shares: string; price: string; value: string; change: string; tone: string }
 type ExtractedHolding = { ticker: string; name: string; shares: number; average_price: number; currency: string }
+type Portfolio = { id: string; name: string; holdings: Holding[]; cash: { usd: number; jpy: number } }
+type CashAmount = { usd: number; jpy: number }
 
 const initialHoldings: Holding[] = [
   { ticker: 'NVDA', name: 'NVIDIA Corporation', shares: '120', price: '$118.33', value: '$14,199.60', change: '+42.8%', tone: 'green' },
@@ -34,8 +35,7 @@ const initialHoldings: Holding[] = [
   { ticker: 'AAPL', name: 'Apple Inc.', shares: '50', price: '$211.18', value: '$10,559.00', change: '+8.1%', tone: 'orange' },
 ]
 
-const HOLDINGS_KEY = 'folio_holdings'
-const CASH_KEY = 'folio_cash'
+const PORTFOLIOS_KEY = 'folio_portfolios'
 const FX_KEY = 'folio_fx'
 
 function loadFx(): number {
@@ -46,6 +46,31 @@ function loadFx(): number {
   } catch {
     return 150
   }
+}
+
+// 従来の単一 holdings / cash から最初のポートフォリオへ移行、以後は portfolios で管理
+function loadPortfolios(): Portfolio[] {
+  try {
+    const raw = window.localStorage.getItem(PORTFOLIOS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Portfolio[]
+      if (Array.isArray(parsed) && parsed.length) return parsed
+    }
+  } catch { /* 破損時は再構築 */ }
+
+  let holdings: Holding[]
+  try {
+    const h = JSON.parse(window.localStorage.getItem('folio_holdings') || '') as Holding[]
+    holdings = Array.isArray(h) ? h : initialHoldings
+  } catch {
+    holdings = initialHoldings
+  }
+  let cash: CashAmount = { usd: 7232.5, jpy: 0 }
+  try {
+    const c = JSON.parse(window.localStorage.getItem('folio_cash') || '') as { usd?: number; jpy?: number }
+    cash = { usd: Number(c.usd) || 0, jpy: Number(c.jpy) || 0 }
+  } catch { /* default */ }
+  return [{ id: 'default', name: 'Personal portfolio', holdings, cash }]
 }
 
 // "$14,199.60" や "¥1,234,567" を通貨付き数値に分解
@@ -68,29 +93,6 @@ function yahooSymbol(ticker: string, isJpy: boolean): string {
 
 type Quote = { price: number; prevClose: number | null }
 
-function loadCash(): { usd: number; jpy: number } {
-  try {
-    const raw = window.localStorage.getItem(CASH_KEY)
-    if (!raw) return { usd: 7232.5, jpy: 0 }
-    const parsed = JSON.parse(raw) as { usd?: number; jpy?: number }
-    return { usd: Number(parsed.usd) || 0, jpy: Number(parsed.jpy) || 0 }
-  } catch {
-    return { usd: 7232.5, jpy: 0 }
-  }
-}
-
-function loadHoldings(): Holding[] {
-  try {
-    const raw = window.localStorage.getItem(HOLDINGS_KEY)
-    if (!raw) return initialHoldings
-    const parsed = JSON.parse(raw) as Holding[]
-    if (!Array.isArray(parsed)) return initialHoldings
-    return parsed
-  } catch {
-    return initialHoldings
-  }
-}
-
 const allocation = [
   { label: '米国株', value: 61, color: '#3559e6' },
   { label: 'ETF', value: 27, color: '#8b78e8' },
@@ -107,7 +109,8 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 function App() {
-  const [holdings, setHoldings] = useState<Holding[]>(loadHoldings)
+  const [portfolios, setPortfolios] = useState<Portfolio[]>(loadPortfolios)
+  const [activeId, setActiveId] = useState<string>('all')
   const [active, setActive] = useState('overview')
   const [showImporter, setShowImporter] = useState(false)
   const [imageName, setImageName] = useState('')
@@ -117,31 +120,40 @@ function App() {
   const [importError, setImportError] = useState('')
   const [editing, setEditing] = useState<Holding | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [cash, setCash] = useState<{ usd: number; jpy: number }>(loadCash)
   const [showCash, setShowCash] = useState(false)
   const [fxRate, setFxRate] = useState<number>(loadFx)
   const [showFx, setShowFx] = useState(false)
   const [valueSort, setValueSort] = useState<'asc' | 'desc' | null>(null)
   const [updating, setUpdating] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
+  const [showAddPortfolio, setShowAddPortfolio] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    window.localStorage.setItem(HOLDINGS_KEY, JSON.stringify(holdings))
-  }, [holdings])
-
-  useEffect(() => {
-    window.localStorage.setItem(CASH_KEY, JSON.stringify(cash))
-  }, [cash])
+    window.localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(portfolios))
+  }, [portfolios])
 
   useEffect(() => {
     window.localStorage.setItem(FX_KEY, String(fxRate))
   }, [fxRate])
 
+  // 現在の表示対象: 個別ポートフォリオ or 総合（全合算）
+  const isAll = activeId === 'all'
+  const current = portfolios.find((p) => p.id === activeId) || portfolios[0]
+  const currentId = current?.id || 'all'
+  const holdings = current?.holdings || []
+  const cash: CashAmount = current?.cash || { usd: 0, jpy: 0 }
+
+  // 総合ビュー: 全ポートフォリオの銘柄 + 現金を合算
+  const allHoldings = portfolios.flatMap((p) => p.holdings)
+  const allCash: CashAmount = portfolios.reduce((acc, p) => ({ usd: acc.usd + p.cash.usd, jpy: acc.jpy + p.cash.jpy }), { usd: 0, jpy: 0 })
+  const displayHoldings = isAll ? allHoldings : holdings
+  const displayCash = isAll ? allCash : cash
+
   // 両通貨の合計を計算（fxRate で換算）
-  let totalUsd = cash.usd
-  let totalJpy = cash.jpy
-  holdings.forEach((h) => {
+  let totalUsd = displayCash.usd
+  let totalJpy = displayCash.jpy
+  displayHoldings.forEach((h) => {
     const { currency, amount } = parseMoney(h.value)
     if (currency === 'JPY') totalJpy += amount
     else totalUsd += amount
@@ -149,7 +161,7 @@ function App() {
   const totalInUsd = totalUsd + totalJpy / fxRate
   const totalInJpy = totalUsd * fxRate + totalJpy
 
-  const sortedHoldings = valueSort ? [...holdings].sort((a, b) => valueSort === 'desc' ? valueUsd(b, fxRate) - valueUsd(a, fxRate) : valueUsd(a, fxRate) - valueUsd(b, fxRate)) : holdings
+  const sortedHoldings = valueSort ? [...displayHoldings].sort((a, b) => valueSort === 'desc' ? valueUsd(b, fxRate) - valueUsd(a, fxRate) : valueUsd(a, fxRate) - valueUsd(b, fxRate)) : displayHoldings
 
   const handleFile = async (file?: File) => {
     if (!file) {
@@ -191,24 +203,30 @@ function App() {
   }
 
   const addExtracted = () => {
+    if (isAll) return
     const additions = extracted.filter((item) => item.ticker && item.shares != null).map((item, index) => ({
       ticker: item.ticker, name: item.name || item.ticker, shares: String(item.shares), price: `${item.currency === 'JPY' ? '¥' : '$'}${Number(item.average_price || 0).toFixed(2)}`,
       value: `${item.currency === 'JPY' ? '¥' : '$'}${(Number(item.shares) * Number(item.average_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, change: '—', tone: ['green', 'blue', 'purple', 'orange'][index % 4],
     }))
-    setHoldings((items) => [...additions, ...items])
+    setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, holdings: [...additions, ...p.holdings] } : p))
     setShowImporter(false)
     setExtracted([])
     setImageName('')
   }
 
-  const removeHolding = (ticker: string) => setHoldings((items) => items.filter((item) => item.ticker !== ticker))
+  const removeHolding = (ticker: string) => {
+    if (isAll) return
+    setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, holdings: p.holdings.filter((item) => item.ticker !== ticker) } : p))
+  }
 
   const updateHolding = (updated: Holding) => {
-    setHoldings((items) => items.map((item) => (item.ticker === updated.ticker ? updated : item)))
+    if (isAll) return
+    setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, holdings: p.holdings.map((item) => (item.ticker === updated.ticker ? updated : item)) } : p))
     setEditing(null)
   }
 
   const addHolding = (h: { ticker: string; name: string; currency: 'USD' | 'JPY'; shares: number; price: number; tone?: string }) => {
+    if (isAll) return
     const symbol = h.currency === 'JPY' ? '¥' : '$'
     const newHolding: Holding = {
       ticker: h.ticker,
@@ -219,8 +237,27 @@ function App() {
       change: '—',
       tone: h.tone || 'blue',
     }
-    setHoldings((items) => [newHolding, ...items])
+    setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, holdings: [newHolding, ...p.holdings] } : p))
     setShowAdd(false)
+  }
+
+  const saveCash = (usd: number, jpy: number) => {
+    if (isAll) return
+    setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, cash: { usd: usd || 0, jpy: jpy || 0 } } : p))
+    setShowCash(false)
+  }
+
+  const addPortfolio = (name: string) => {
+    const id = `p${Date.now()}`
+    setPortfolios((ps) => [...ps, { id, name: name.trim() || 'New portfolio', holdings: [], cash: { usd: 0, jpy: 0 } }])
+    setActiveId(id)
+    setShowAddPortfolio(false)
+  }
+
+  const removePortfolio = (id: string) => {
+    if (portfolios.length <= 1) return
+    setPortfolios((ps) => ps.filter((p) => p.id !== id))
+    if (activeId === id) setActiveId('all')
   }
 
   // 株価・為替をYahoo Financeから一括更新
@@ -266,7 +303,7 @@ function App() {
         })
       }
       const ok = updated.filter((h): h is Holding => h !== null)
-      if (ok.length) setHoldings(ok)
+      if (ok.length) setPortfolios((ps) => ps.map((p) => p.id === currentId ? { ...p, holdings: ok } : p))
       const parts = [fxNote, ok.length ? `${ok.length}銘柄を更新` : ''].filter(Boolean)
       setUpdateMsg([...parts, ...(errors.length ? [`エラー: ${errors.join(' · ')}`] : [])].join(' · ') || '更新に失敗しました')
     } catch (e) {
@@ -276,20 +313,19 @@ function App() {
     }
   }
 
-  const saveCash = (usd: number, jpy: number) => {
-    setCash({ usd: usd || 0, jpy: jpy || 0 })
-    setShowCash(false)
-  }
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><BarChart3 size={17} strokeWidth={2.7} /></div><span>folio</span></div>
-        <div className="workspace-switcher"><div className="workspace-avatar">T</div><div><strong>Tokutake</strong><small>Personal portfolio</small></div><ChevronDown size={15} /></div>
+        <div className="portfolio-select">
+          <button className={activeId === 'all' ? 'portfolio-item all active' : 'portfolio-item all'} onClick={() => setActiveId('all')}><span className="pf-ico"><LayoutGrid size={14} /></span><span><strong>総合</strong><small>{portfolios.length} portfolio</small></span></button>
+          {portfolios.map((p) => <div className="portfolio-row" key={p.id}><button className={activeId === p.id ? 'portfolio-item active' : 'portfolio-item'} onClick={() => setActiveId(p.id)}><span className="pf-ico">{(p.name || 'P').slice(0, 1).toUpperCase()}</span><span><strong>{p.name}</strong><small>{p.holdings.length} holdings</small></span></button>{portfolios.length > 1 && <button className="pf-del" onClick={() => removePortfolio(p.id)} title="Remove portfolio"><X size={13} /></button>}</div>)}
+          <button className="pf-add" onClick={() => setShowAddPortfolio(true)}><Plus size={14} />Add portfolio</button>
+        </div>
         <nav className="nav">
           <p className="nav-label">WORKSPACE</p>
           <button className={active === 'overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('overview')}><Home size={17} />Overview</button>
-          <button className={active === 'holdings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('holdings')}><WalletCards size={17} />Holdings <span className="nav-count">{holdings.length}</span></button>
+          <button className={active === 'holdings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('holdings')}><WalletCards size={17} />Holdings <span className="nav-count">{displayHoldings.length}</span></button>
           <button className="nav-item" onClick={() => setShowImporter(true)}><Sparkles size={17} />AI Import <span className="new-pill">NEW</span></button>
           <button className="nav-item"><LayoutGrid size={17} />Allocation</button>
           <p className="nav-label second">TOOLS</p>
@@ -303,9 +339,9 @@ function App() {
         <header className="topbar"><div className="breadcrumbs"><span>Portfolio</span><span>/</span><strong>Overview</strong></div><div className="top-actions"><div className="search"><Search size={16} /><input placeholder="Search holdings..." /></div><button className="icon-button"><Bell size={18} /></button><button className="avatar-small">TK</button></div></header>
         <div className="content-wrap">
           <section className="page-heading"><div><p className="eyebrow">TUESDAY, JUNE 17, 2025 <span className="live-dot" />MARKET OPEN</p><h1>Good morning, Tokutake <span>✦</span></h1><p className="subheading">Here's how your portfolio is doing today.</p></div><div className="heading-actions"><button className="secondary-button"><ArrowDownToLine size={16} />Export</button><button className="primary-button" onClick={() => setShowImporter(true)}><Sparkles size={16} />Import with AI</button></div></section>
-          <section className="metrics-grid"><TotalMetric usd={totalInUsd} jpy={totalInJpy} fxRate={fxRate} onRate={() => setShowFx(true)} /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${cash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${cash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
+          <section className="metrics-grid"><TotalMetric usd={totalInUsd} jpy={totalInJpy} fxRate={fxRate} onRate={() => setShowFx(true)} /><Metric label="Today’s return" value="+$1,204.82" change="Since market open" percent="+2.04%" icon={<BarChart3 size={18} />} positive /><Metric label="Total return" value="+$12,486.90" change="Since inception" percent="+26.12%" icon={<ArrowUpRight size={18} />} positive /><Metric label="Cash available" value={`$${displayCash.usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} change={`¥${displayCash.jpy.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} percent="" icon={<WalletCards size={18} />} /></section>
           <div className="dashboard-grid"><section className="panel performance-panel"><div className="panel-heading"><div><h2>Portfolio performance</h2><p>Track your portfolio value over time</p></div><div className="range-tabs"><button>1W</button><button>1M</button><button className="selected">3M</button><button>1Y</button><button>ALL</button></div></div><div className="chart-wrap"><div className="chart-y"><span>$65k</span><span>$60k</span><span>$55k</span><span>$50k</span><span>$45k</span></div><svg viewBox="0 0 720 250" preserveAspectRatio="none" className="chart"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#4264e8" stopOpacity=".2" /><stop offset="100%" stopColor="#4264e8" stopOpacity="0" /></linearGradient></defs><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20 L720,250 L0,250Z" fill="url(#area)" /><path d="M0,214 C28,208 45,210 62,192 S99,174 118,186 S148,161 175,169 S209,149 226,154 S255,122 280,134 S316,115 337,121 S360,95 390,104 S425,79 446,89 S475,63 504,72 S538,45 564,56 S597,31 625,46 S657,26 681,32 S708,18 720,20" fill="none" stroke="#4264e8" strokeWidth="3" strokeLinecap="round" /></svg><div className="chart-x"><span>Mar 17</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span><span>May 15</span><span>Jun 01</span><span>Jun 17</span></div></div></section><section className="panel allocation-panel"><div className="panel-heading"><div><h2>Allocation</h2><p>Where your money is invested</p></div><button className="more-button"><MoreHorizontal size={18} /></button></div><div className="donut-area"><div className="donut"><div className="donut-hole"><strong>88%</strong><span>Invested</span></div></div><div className="legend">{allocation.map((item) => <div className="legend-row" key={item.label}><span className="legend-swatch" style={{ background: item.color }} /><span>{item.label}</span><strong>{item.value}%</strong></div>)}</div></div><button className="text-button">View allocation details <ArrowUpRight size={14} /></button></section></div>
-          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{holdings.length}</span></h2><p>Positions in your portfolio</p></div><div className="holding-actions"><button className="ghost-button" onClick={refreshPrices} disabled={updating}><RefreshCw size={15} />{updating ? '更新中…' : 'Update prices'}</button><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><button className="sort-head" onClick={() => setValueSort(valueSort === 'desc' ? 'asc' : 'desc')}>VALUE {valueSort ? (valueSort === 'desc' ? '↓' : '↑') : ''}</button><span>RETURN</span><span /></div>{sortedHoldings.map((holding) => { const mv = parseMoney(holding.value); const conv = mv.currency === 'JPY' ? `$${Math.round(mv.amount / fxRate).toLocaleString()}` : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`; return <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><div className="value-cell"><strong>{holding.value}</strong><small>{conv}</small></div><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div> })}</div></section>
+          <section className="panel holdings-panel"><div className="panel-heading"><div><h2>Your holdings <span className="count-badge">{displayHoldings.length}</span></h2><p>Positions in {isAll ? 'all portfolios' : (current?.name || 'portfolio')}</p></div><div className="holding-actions"><button className="ghost-button" onClick={refreshPrices} disabled={updating}><RefreshCw size={15} />{updating ? '更新中…' : 'Update prices'}</button><button className="ghost-button" onClick={() => setShowCash(true)}><WalletCards size={15} />Cash</button><button className="add-button" onClick={() => setShowAdd(true)}><Plus size={16} />Add holding</button></div></div><div className="table"><div className="table-head"><span>ASSET</span><span>SHARES</span><span>PRICE</span><button className="sort-head" onClick={() => setValueSort(valueSort === 'desc' ? 'asc' : 'desc')}>VALUE {valueSort ? (valueSort === 'desc' ? '↓' : '↑') : ''}</button><span>RETURN</span><span /></div>{sortedHoldings.map((holding) => { const mv = parseMoney(holding.value); const conv = mv.currency === 'JPY' ? `$${Math.round(mv.amount / fxRate).toLocaleString()}` : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`; return <div className="table-row" key={holding.ticker}><div className="asset-cell"><div className={`ticker-logo ${holding.tone}`}>{holding.ticker.slice(0, 1)}</div><div><strong>{holding.ticker}</strong><small>{holding.name}</small></div></div><span>{holding.shares}</span><span>{holding.price}</span><div className="value-cell"><strong>{holding.value}</strong><small>{conv}</small></div><span className="positive">{holding.change}</span><div className="row-actions"><button className="row-menu" onClick={() => setEditing(holding)} title="Edit holding"><Pencil size={15} /></button><button className="row-menu" onClick={() => removeHolding(holding.ticker)} title="Remove holding"><MoreHorizontal size={17} /></button></div></div> })}</div></section>
           <section className="ai-callout"><div className="ai-orb"><Sparkles size={22} /></div><div><p className="eyebrow">FOLIO AI</p><h2>Turn a screenshot into your portfolio</h2><p>Upload a brokerage screenshot and let AI extract tickers, shares, and prices for you. No manual entry needed.</p></div><button className="primary-button" onClick={() => setShowImporter(true)}>Try AI import <ArrowUpRight size={15} /></button></section>
           {updateMsg && <div className="update-msg">{updateMsg}</div>}
         </div>
@@ -313,8 +349,9 @@ function App() {
       {showImporter && <ImporterModal apiKey={apiKey} setApiKey={setApiKey} imageName={imageName} analyzing={analyzing} extracted={extracted} error={importError} fileRef={fileRef} onFile={handleFile} onAdd={addExtracted} onClose={() => setShowImporter(false)} />}
       {editing && <EditModal holding={editing} onSave={updateHolding} onClose={() => setEditing(null)} />}
       {showAdd && <AddHoldingModal onAdd={addHolding} onClose={() => setShowAdd(false)} />}
-      {showCash && <CashModal usd={cash.usd} jpy={cash.jpy} fxRate={fxRate} onSave={saveCash} onClose={() => setShowCash(false)} />}
+      {showCash && <CashModal usd={displayCash.usd} jpy={displayCash.jpy} fxRate={fxRate} onSave={saveCash} onClose={() => setShowCash(false)} />}
       {showFx && <RateModal fxRate={fxRate} setFxRate={setFxRate} onClose={() => setShowFx(false)} />}
+      {showAddPortfolio && <AddPortfolioModal onAdd={addPortfolio} onClose={() => setShowAddPortfolio(false)} />}
     </div>
   )
 }
@@ -331,6 +368,18 @@ function Metric({ label, value, change, percent, icon, positive }: { label: stri
 
 function stripSymbol(s: string): string {
   return s.replace(/[^0-9.,-]/g, '')
+}
+
+function AddPortfolioModal({ onAdd, onClose }: { onAdd: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const valid = name.trim().length > 0
+
+  const save = () => {
+    if (!valid) return
+    onAdd(name)
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><div className="modal-kicker"><Plus size={14} />NEW PORTFOLIO</div><h2>Add portfolio</h2><p>Create a new portfolio to manage separately.</p></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><label className="api-key-field"><span>PORTFOLIO NAME</span><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 日本株" autoFocus /></label><div className="modal-footer" style={{ marginTop: 0 }}><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={save} disabled={!valid}>Create</button></div></div></div>
 }
 
 function RateModal({ fxRate, setFxRate, onClose }: { fxRate: number; setFxRate: (n: number) => void; onClose: () => void }) {
