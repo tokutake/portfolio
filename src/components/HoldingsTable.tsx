@@ -1,5 +1,5 @@
 import { MoreHorizontal, Pencil, Plus, RefreshCw, WalletCards } from 'lucide-react'
-import { parseMoney } from '../lib/money'
+import { formatAmount, parseMoney } from '../lib/money'
 import type { Holding } from '../types'
 
 type HoldingsTableProps = {
@@ -60,9 +60,12 @@ export function HoldingsTable({
         </div>
         {holdings.map((holding, index) => {
           const mv = parseMoney(holding.value)
-          const conv = mv.currency === 'JPY'
-            ? `$${Math.round(mv.amount / fxRate).toLocaleString()}`
-            : `¥${Math.round(mv.amount * fxRate).toLocaleString()}`
+          // 表示は全銘柄で「円→ドル」の順に統一（日本株と同じ並び）
+          const isJpy = mv.currency === 'JPY'
+          const jpyAmount = isJpy ? mv.amount : mv.amount * fxRate
+          const usdAmount = isJpy ? mv.amount / fxRate : mv.amount
+          const jpyStr = formatAmount(jpyAmount, 'JPY', 0)
+          const usdStr = formatAmount(usdAmount, 'USD', 0)
           return (
             <div className="table-row" key={index}>
               <div className="asset-cell">
@@ -72,8 +75,8 @@ export function HoldingsTable({
               <span>{holding.shares}</span>
               <span>{holding.price}</span>
               <div className="value-cell">
-                <strong>{holding.value}</strong>
-                <small>{conv}</small>
+                <strong>{jpyStr}</strong>
+                <small>{usdStr}</small>
               </div>
               <span className="positive">{holding.change}</span>
               <div className="row-actions">
