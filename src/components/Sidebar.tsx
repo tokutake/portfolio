@@ -3,12 +3,12 @@ import {
   BarChart3,
   Bell,
   CircleHelp,
+  FileSpreadsheet,
   Home,
   LayoutGrid,
   MoreHorizontal,
   Plus,
   Settings,
-  Sparkles,
   WalletCards,
   X,
 } from 'lucide-react'
@@ -23,7 +23,7 @@ type SidebarProps = {
   active: NavTab
   onSelectPortfolio: (id: string) => void
   onShowTab: (tab: NavTab) => void
-  onAiImport: () => void
+  onCsvImport: () => void
   onAddPortfolio: () => void
   onRemovePortfolio: (id: string) => void
 }
@@ -35,7 +35,7 @@ export function Sidebar({
   active,
   onSelectPortfolio,
   onShowTab,
-  onAiImport,
+  onCsvImport,
   onAddPortfolio,
   onRemovePortfolio,
 }: SidebarProps) {
@@ -52,7 +52,7 @@ export function Sidebar({
           onClick={() => onSelectPortfolio('all')}
         >
           <span className="pf-ico"><LayoutGrid size={14} /></span>
-          <span><strong>総合</strong><small>{portfolios.length} portfolio</small></span>
+          <span><strong>Total</strong><small>{portfolios.length} portfolio</small></span>
         </button>
         {portfolios.map((p) => (
           <div className="portfolio-row" key={p.id}>
@@ -81,8 +81,8 @@ export function Sidebar({
         <button className={active === 'holdings' ? 'nav-item active' : 'nav-item'} onClick={() => onShowTab('holdings')}>
           <WalletCards size={17} />Holdings <span className="nav-count">{holdingsCount}</span>
         </button>
-        <button className="nav-item" onClick={onAiImport}>
-          <Sparkles size={17} />AI Import <span className="new-pill">NEW</span>
+        <button className="nav-item" onClick={onCsvImport}>
+          <FileSpreadsheet size={17} />CSV Import
         </button>
         <button className="nav-item"><LayoutGrid size={17} />Allocation</button>
         <p className="nav-label second">TOOLS</p>
@@ -94,14 +94,14 @@ export function Sidebar({
         <button className="nav-item"><Settings size={17} />Settings</button>
         <button className="nav-item"><CircleHelp size={17} />Help center</button>
         <div className="upgrade-card">
-          <div className="upgrade-icon"><Sparkles size={15} /></div>
+          <div className="upgrade-icon"><FileSpreadsheet size={15} /></div>
           <strong>Make smarter moves</strong>
           <span>Unlock advanced insights with folio Pro.</span>
           <button>Explore Pro <ArrowUpRight size={13} /></button>
         </div>
         <div className="profile">
-          <div className="profile-avatar">TK</div>
-          <div><strong>Tokutake</strong><small>Free plan</small></div>
+          <div className="profile-avatar">U</div>
+          <div><strong>User</strong><small>Free plan</small></div>
           <MoreHorizontal size={17} />
         </div>
       </div>

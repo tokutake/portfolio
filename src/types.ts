@@ -11,17 +11,6 @@ export type Holding = {
   tone: string
 }
 
-// AIスクショ抽出の生データ（株数 or 評価額のみのケースがある）
-export type ExtractedHolding = {
-  ticker: string
-  name: string
-  shares: number | null
-  average_price: number | null
-  currency: string
-  amount?: number | null
-  percent?: number | null
-}
-
 export type CashAmount = { usd: number; jpy: number }
 
 export type Portfolio = {

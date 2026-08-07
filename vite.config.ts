@@ -52,14 +52,5 @@ function marketDataProxy(): Plugin[] {
 
 export default defineConfig({
   plugins: [react(), ...marketDataProxy()],
-  server: {
-    proxy: {
-      '/openrouter': {
-        target: 'https://openrouter.ai',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/openrouter/, ''),
-      },
-    },
-  },
   preview: {},
 })

@@ -1,4 +1,4 @@
-import { ArrowUpRight, Sparkles } from 'lucide-react'
+import { ArrowUpRight, FileSpreadsheet } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { DashboardPanels } from './components/DashboardPanels'
 import { HoldingsTable } from './components/HoldingsTable'
@@ -9,15 +9,15 @@ import { Topbar } from './components/Topbar'
 import { AddHoldingModal } from './components/modals/AddHoldingModal'
 import { AddPortfolioModal } from './components/modals/AddPortfolioModal'
 import { CashModal } from './components/modals/CashModal'
+import { CsvImporterModal } from './components/modals/CsvImporterModal'
 import { EditModal } from './components/modals/EditModal'
-import { ImporterModal } from './components/modals/ImporterModal'
 import { RateModal } from './components/modals/RateModal'
-import { ASSET_ETF, TONES } from './constants'
-import { analyzeScreenshot, backfillShares, fileToDataUrl } from './lib/aiImport'
 import { fetchQuotes, yahooSymbol } from './lib/marketdata'
 import { aggregateHoldings, parseMoney, valueUsd } from './lib/money'
-import { getApiKey, loadFx, loadPortfolios, saveApiKey, saveFx, savePortfolios } from './lib/storage'
-import type { CashAmount, ExtractedHolding, Holding, Portfolio } from './types'
+import { buildExportPayload, downloadJson, loadFx, loadPortfolios, parseImportPayload, saveFx, savePortfolios } from './lib/storage'
+import { csvHoldingsToHoldings, parseCsv } from './lib/csvImport'
+import type { CashAmount, Holding, Portfolio } from './types'
+import type { CsvHolding } from './lib/csvImport'
 
 type NavTab = 'overview' | 'holdings'
 
@@ -28,14 +28,12 @@ function App() {
   const [fxRate, setFxRate] = useState<number>(loadFx)
   const [valueSort, setValueSort] = useState<'asc' | 'desc' | null>(null)
 
-  const [showImporter, setShowImporter] = useState(false)
-  const [imageName, setImageName] = useState('')
-  const [apiKey, setApiKey] = useState<string>(getApiKey)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [extracted, setExtracted] = useState<ExtractedHolding[]>([])
-  const [importError, setImportError] = useState('')
+  const [showCsvImporter, setShowCsvImporter] = useState(false)
+  const [csvFileName, setCsvFileName] = useState('')
+  const [csvHoldings, setCsvHoldings] = useState<CsvHolding[]>([])
+  const [csvErrors, setCsvErrors] = useState<string[]>([])
   const [importTargetId, setImportTargetId] = useState<string>('')
-  const fileRef = useRef<HTMLInputElement>(null)
+  const csvFileRef = useRef<HTMLInputElement>(null)
 
   const [editing, setEditing] = useState<Holding | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -44,6 +42,7 @@ function App() {
   const [showAddPortfolio, setShowAddPortfolio] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
+  const jsonImportRef = useRef<HTMLInputElement>(null)
 
   // localStorage への永続化
   useEffect(() => savePortfolios(portfolios), [portfolios])
@@ -83,62 +82,37 @@ function App() {
 
   // ---- ハンドラ ----
 
-  const handleFile = async (file?: File) => {
+  const handleCsvFile = async (file?: File) => {
     if (!file) {
-      setImageName('')
-      setExtracted([])
-      setImportError('')
+      setCsvFileName('')
+      setCsvHoldings([])
+      setCsvErrors([])
       return
     }
-    setImageName(file.name)
-    setImportError('')
-    setExtracted([])
-    setAnalyzing(true)
+    setCsvFileName(file.name)
     try {
-      if (!apiKey.trim()) throw new Error('OpenRouter APIキーを入力してください')
-      saveApiKey(apiKey.trim())
-      const dataUrl = await fileToDataUrl(file)
-      const items = await analyzeScreenshot(dataUrl, apiKey.trim())
-      setExtracted(items)
+      const text = await file.text()
+      const { holdings, errors } = parseCsv(text)
+      setCsvHoldings(holdings)
+      setCsvErrors(errors)
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'AI解析に失敗しました')
-    } finally {
-      setAnalyzing(false)
+      setCsvErrors([error instanceof Error ? error.message : 'CSV解析に失敗しました'])
+      setCsvHoldings([])
     }
   }
 
-  const addExtracted = async (targetId?: string) => {
+  const addCsvHoldings = (targetId?: string) => {
     const dest = targetId || importTargetId || currentId
     if (!dest || dest === 'all') return
-    const additions: Holding[] = []
-    for (const item of extracted) {
-      if (!item.ticker) continue
-      const realTicker = ASSET_ETF[item.ticker] || item.ticker
-      const tone = TONES[additions.length % TONES.length]
-      if (item.shares != null) {
-        additions.push({
-          ticker: realTicker,
-          name: item.name || realTicker,
-          shares: String(item.shares),
-          price: `${item.currency === 'JPY' ? '¥' : '$'}${Number(item.average_price || 0).toFixed(2)}`,
-          value: `${item.currency === 'JPY' ? '¥' : '$'}${(Number(item.shares) * Number(item.average_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-          change: '—',
-          tone,
-        })
-      } else {
-        // 評価額(amount)のみ → 現在株価から株数を逆算
-        const bf = await backfillShares({ ticker: realTicker, amount: item.amount }, fxRate)
-        if (bf) {
-          additions.push({ ticker: realTicker, name: item.name || realTicker, shares: bf.shares, price: bf.price, value: bf.value, change: '—', tone })
-        }
-      }
-    }
-    if (!additions.length) return
+    if (!csvHoldings.length) return
+    const additions = csvHoldingsToHoldings(csvHoldings)
     setPortfolios((ps) => ps.map((p) => (p.id === dest ? { ...p, holdings: [...additions, ...p.holdings] } : p)))
-    setShowImporter(false)
-    setExtracted([])
-    setImageName('')
+    setShowCsvImporter(false)
+    setCsvHoldings([])
+    setCsvFileName('')
+    setCsvErrors([])
     setImportTargetId('')
+    setUpdateMsg(`${additions.length}件をCSVから追加しました`)
   }
 
   const removeHolding = (ticker: string) => {
@@ -185,6 +159,28 @@ function App() {
     if (portfolios.length <= 1) return
     setPortfolios((ps) => ps.filter((p) => p.id !== id))
     if (activeId === id) setActiveId('all')
+  }
+
+  const handleExport = () => {
+    const payload = buildExportPayload(portfolios, fxRate)
+    const date = new Date().toISOString().slice(0, 10)
+    downloadJson(`folio-export-${date}.json`, payload)
+    setUpdateMsg(`エクスポートしました: ${portfolios.length}ポートフォリオ`)
+  }
+
+  const handleImportJsonFile = async (file?: File) => {
+    if (!file) return
+    try {
+      const text = await file.text()
+      const { portfolios: imported, fxRate: importedFx } = parseImportPayload(text)
+      setPortfolios(imported)
+      if (importedFx != null) setFxRate(importedFx)
+      setUpdateMsg(`インポートしました: ${imported.length}ポートフォリオ${importedFx != null ? ' + 為替レート' : ''}`)
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? `インポート失敗: ${e.message}` : 'インポートに失敗しました')
+    } finally {
+      if (jsonImportRef.current) jsonImportRef.current.value = ''
+    }
   }
 
   // 株価・為替をYahoo Financeから一括更新
@@ -245,7 +241,7 @@ function App() {
         active={active}
         onSelectPortfolio={setActiveId}
         onShowTab={setActive}
-        onAiImport={() => setShowImporter(true)}
+        onCsvImport={() => setShowCsvImporter(true)}
         onAddPortfolio={() => setShowAddPortfolio(true)}
         onRemovePortfolio={removePortfolio}
       />
@@ -253,7 +249,8 @@ function App() {
       <main className="main-content">
         <Topbar />
         <div className="content-wrap">
-          <PageHeading onImport={() => setShowImporter(true)} />
+          <PageHeading onCsvImport={() => setShowCsvImporter(true)} onExport={handleExport} onImportJson={() => jsonImportRef.current?.click()} />
+          <input ref={jsonImportRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(e) => handleImportJsonFile(e.target.files?.[0])} />
           <Metrics
             usd={totalInUsd}
             jpy={totalInJpy}
@@ -278,34 +275,36 @@ function App() {
             onRemove={removeHolding}
           />
           <section className="ai-callout">
-            <div className="ai-orb"><Sparkles size={22} /></div>
+            <div className="ai-orb"><FileSpreadsheet size={22} /></div>
             <div>
-              <p className="eyebrow">FOLIO AI</p>
-              <h2>Turn a screenshot into your portfolio</h2>
-              <p>Upload a brokerage screenshot and let AI extract tickers, shares, and prices for you. No manual entry needed.</p>
+              <p className="eyebrow">CSV IMPORT</p>
+              <h2>Import from your broker</h2>
+              <p>証券会社の取引履歴CSVから保有銘柄を一括登録。RoboPro等のPDFは別途対応予定。</p>
             </div>
-            <button className="primary-button" onClick={() => setShowImporter(true)}>Try AI import <ArrowUpRight size={15} /></button>
+            <button className="primary-button" onClick={() => setShowCsvImporter(true)}>Import CSV <ArrowUpRight size={15} /></button>
           </section>
           {updateMsg && <div className="update-msg">{updateMsg}</div>}
         </div>
       </main>
 
-      {showImporter && (
-        <ImporterModal
-          apiKey={apiKey}
-          setApiKey={setApiKey}
-          imageName={imageName}
-          analyzing={analyzing}
-          extracted={extracted}
-          error={importError}
-          fileRef={fileRef}
+      {showCsvImporter && (
+        <CsvImporterModal
+          fileName={csvFileName}
+          holdings={csvHoldings}
+          errors={csvErrors}
           portfolios={portfolios}
           targetId={importTargetId}
           lastPortfolio={currentId}
           setTargetId={setImportTargetId}
-          onFile={handleFile}
-          onAdd={addExtracted}
-          onClose={() => setShowImporter(false)}
+          fileRef={csvFileRef}
+          onFile={handleCsvFile}
+          onAdd={addCsvHoldings}
+          onClose={() => {
+            setShowCsvImporter(false)
+            setCsvFileName('')
+            setCsvHoldings([])
+            setCsvErrors([])
+          }}
         />
       )}
       {editing && <EditModal holding={editing} onSave={updateHolding} onClose={() => setEditing(null)} />}

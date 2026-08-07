@@ -7,7 +7,7 @@ export function Topbar() {
       <div className="top-actions">
         <div className="search"><Search size={16} /><input placeholder="Search holdings..." /></div>
         <button className="icon-button"><Bell size={18} /></button>
-        <button className="avatar-small">TK</button>
+        <button className="avatar-small">U</button>
       </div>
     </header>
   )

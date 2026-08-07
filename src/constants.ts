@@ -3,27 +3,11 @@ import type { Holding } from './types'
 // localStorage キー
 export const PORTFOLIOS_KEY = 'folio_portfolios'
 export const FX_KEY = 'folio_fx'
-export const API_KEY_KEY = 'openrouter_api_key'
 
 export const DEFAULT_FX_RATE = 150
 
-// AIスクショ抽出に使うモデル
-export const AI_MODEL = 'google/gemini-2.5-flash'
-
 // 銘柄カードの色テーマ（追加時に順番に割り当てる）
 export const TONES = ['green', 'blue', 'purple', 'orange']
-
-// ROBOPRO 等の資産クラス名 → 実際のETFティッカー（金額ベース取り込み用）
-export const ASSET_ETF: Record<string, string> = {
-  米国株: 'VTI',
-  先進国株: 'VEA',
-  新興国株: 'VWO',
-  米国リート: 'IYR',
-  金: 'GLD',
-  米国債券: 'BND',
-  ハイイールド債: 'HYG',
-  新興国債券: 'EMB',
-}
 
 // レガシー単一ポートフォリオ時代の初期データ（移行時・初回のみ使用）
 export const INITIAL_HOLDINGS: Holding[] = [
